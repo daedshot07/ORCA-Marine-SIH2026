@@ -1,0 +1,18 @@
+# The only dependency. Same driver ORCA uses (backend/requirements.txt pins
+# psycopg[binary,pool]>=3.2).
+#
+# Nothing else is needed, on purpose:
+#   - clipping and simplification run in PostGIS, not shapely
+#   - geometry comes back as GeoJSON and is parsed with the stdlib json module
+#   - H3 indices arrive as 15-char hex strings and convert with int(s, 16),
+#     so the h3 package is not needed either
+psycopg[binary]>=3.2
+
+# Resolves each landing centre to the hazard cell it sits in, and gives every
+# bundled cell a centroid. Doing it here once means the app ships no geometry
+# library: h3-js is 92 KB gzipped, most of the bundle download again, and this
+# is arithmetic that does not need to happen on 602 devices.
+#
+# Pinned >=4.1 the same way ORCA pins it, so a pasted v3 snippet fails loudly
+# rather than silently computing a different cell.
+h3>=4.1

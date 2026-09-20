@@ -1,0 +1,1238 @@
+/*
+ * Black and white only. Two ink values, #000 and #fff, and nothing between
+ * them. No colour anywhere, not even a grey: a phone held at arm's length on
+ * open water in the middle of the day has a washed-out screen, and a mid-grey
+ * is the first thing to disappear.
+ *
+ * Danger is carried by inversion and by pattern, never by hue, so it survives
+ * both direct sunlight and any form of colour blindness. Every state has a
+ * distinct pattern as well as a distinct arrangement, so none of them can be
+ * confused by shape alone either.
+ *
+ * LAYOUT RULE, and the reason for the structure below: the verdict and all
+ * three figures must be visible without scrolling on a 360 by 640 phone. They
+ * are laid out as fixed children of a full-height column, with a single
+ * scrolling region beneath them. Nothing added later can push them off the
+ * screen, because they are not in the part that scrolls.
+ *
+ * The map is 52dvh, raised from 45. On a tall phone that is the whole point:
+ * at 430 by 950 it draws 494 px of sea instead of 428.
+ *
+ * Budget at 430 by 950: header 40, stale 34, map 494, legend 28, verdict 90,
+ * figures 91, big buttons 60, change-area button 44, gaps 30. 911 of 950.
+ *
+ * Budget at 360 by 640: the same fixed parts come to 750 of 640, so the map
+ * gives back 110 and lands at 223 -- SMALLER than it was before this change.
+ * That is the documented behaviour rather than an overflow: .mapwrap is the
+ * only fixed child that may shrink (flex: 0 1 auto, min-height: 0) and
+ * everything below it is flex: 0 0 auto, so the verdict and the three figures
+ * keep their height no matter what. A short screen has never been able to
+ * show a big map and the whole verdict at once, and the verdict wins.
+ *
+ * The scrolling region below got SHORTER at the same time, on purpose. "Change
+ * area" was an always-open block of two selects and two buttons; it is a
+ * disclosure now. The escape screen is a separate layer rather than more rows
+ * here. One screen, one decision -- and the second decision got its own screen.
+ */
+
+:root {
+  --ink: #000;
+  --paper: #fff;
+
+  /*
+   * Colour is a SECOND channel, never the only one. Hues are ORCA's, from its
+   * frontend/lib/color.ts, so a boat and a control room are not colour-coded
+   * differently for the same sea.
+   *
+   * Every state keeps the pattern and the inversion it had when this interface
+   * was strictly monochrome. Strip the hue and nothing is lost: that is what
+   * keeps it readable on a washed-out screen in direct sunlight and to a
+   * colourblind reader.
+   *
+   * The four tints must match TINT_* in src/constants.ts, which is what the
+   * canvas paints. The screen check compares them.
+   */
+  --tint-danger: #f7d7d5;
+  --tint-caution: #fbeecb;
+  --tint-safe: #eef6f1;
+  --tint-nodata: #eceef0;
+
+  --accent-danger: #d9534f;
+  --accent-caution: #e0a458;
+  --accent-safe: #58b08a;
+  --accent-nodata: #9aa0a6;
+  --rule: 3px;
+  --gap: 8px;
+  /* Nothing smaller than this is usable with wet hands on a wet screen. */
+  --tap: 56px;
+  --map-height: 52dvh;
+}
+
+* { box-sizing: border-box; }
+
+/*
+ * THE hidden ATTRIBUTE MUST WIN. This one rule is a bug fix, and the bug it
+ * fixes took out the whole app.
+ *
+ * `hidden` gets its display:none from the USER AGENT stylesheet, so any author
+ * rule that sets display beats it. `.escape` sets display:flex, so the escape
+ * overlay -- position:fixed, inset:0, z-index:10 -- rendered on page load over
+ * the home screen, empty, because its render() had never run. Its CLOSE button
+ * set .hidden = true and nothing happened, because the attribute had already
+ * lost to the class.
+ *
+ * Three other elements had the same latent fault and one of them was there
+ * before this feature: .figures is display:grid and starts hidden, so the
+ * three empty figures were on screen before any bundle loaded. .escape-open
+ * and .change are display:flex and start hidden too.
+ *
+ * !important because the whole point is to outrank a class, and every rule
+ * below is a class.
+ */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Nothing below 600. Thin type is the first casualty of a bright screen. */
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.22;
+  -webkit-text-size-adjust: 100%;
+}
+
+.app {
+  height: 100dvh;
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+/* --------------------------------------------------------------- header -- */
+
+.head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0 4px;
+  border-bottom: var(--rule) solid var(--ink);
+}
+
+.head__title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.head__state {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: right;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A live fix inverts, so "this is about where you are" is legible at a glance
+   without spending a whole line of the layout on saying it. */
+.head__state--live {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 3px 7px;
+}
+
+/* ---------------------------------------------------------- stale strip -- */
+
+.stale {
+  flex: 0 0 auto;
+  margin: 0;
+  border-left: 12px solid var(--accent-danger);
+  background: var(--ink);
+  color: var(--paper);
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+/* ------------------------------------------------------------------ map -- */
+
+.mapwrap {
+  position: relative;
+  flex: 0 1 auto;
+  height: var(--map-height);
+  /* Shrinks before anything else on a shorter screen, so the figures below are
+     never pushed under the fold. */
+  min-height: 0;
+  border: var(--rule) solid var(--ink);
+}
+
+.mapwrap__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The canvas owns both gestures; the page must not pan or zoom underneath. */
+  touch-action: none;
+}
+
+.centre {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  min-height: 46px;
+  padding: 0 14px;
+  border: var(--rule) solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.centre:active { background: var(--ink); color: var(--paper); }
+
+/*
+ * Disabled is a DASHED BORDER, never a fill pattern. See the rule above
+ * .action. A dashed edge says unavailable without painting a hazard mark
+ * across a control, and it stays legible in sunlight where a grey would not.
+ */
+.centre:disabled {
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+/* --------------------------------------------------------------- legend -- */
+
+.legend {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.legend__item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.legend__swatch {
+  width: 16px;
+  height: 13px;
+  border: 1px solid var(--ink);
+  flex: 0 0 auto;
+}
+
+/* The same four marks the canvas draws, so the key and the map cannot drift. */
+.legend__swatch--danger {
+  background-color: var(--tint-danger);
+  background-image:
+    repeating-linear-gradient(45deg, var(--ink) 0 2px, transparent 2px 5px);
+}
+
+.legend__swatch--caution {
+  background-color: var(--tint-caution);
+  background-image: radial-gradient(var(--ink) 22%, transparent 24%);
+  background-size: 5px 5px;
+}
+
+.legend__swatch--safe { background: var(--tint-safe); }
+
+.legend__swatch--nodata {
+  background-color: var(--tint-nodata);
+  background-image:
+    repeating-linear-gradient(0deg, var(--ink) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(90deg, var(--ink) 0 1px, transparent 1px 5px);
+}
+
+/* -------------------------------------------------------------- verdict -- */
+
+/*
+ * The black frame stays on every state. Colour arrives as a thick left edge,
+ * the same device ORCA uses in its globals.css where each verdict class sets
+ * only border-left-color.
+ */
+.verdict {
+  flex: 0 0 auto;
+  border: var(--rule) solid var(--ink);
+  border-left: 12px solid var(--accent-nodata);
+  padding: 10px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.verdict--safe { border-left-color: var(--accent-safe); background-color: var(--tint-safe); }
+.verdict--caution { border-left-color: var(--accent-caution); }
+.verdict--danger { border-left-color: var(--accent-danger); }
+.verdict--nodata { border-left-color: var(--accent-nodata); }
+
+.verdict__line {
+  margin: 0;
+  font-size: clamp(1.15rem, 5.3vw, 1.8rem);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.verdict__note {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.verdict__note:empty { display: none; }
+
+/* SAFE keeps the plain frame: no pattern, nothing shouting. It is the only
+   quiet state, and it earns that by being the only one below the threshold. */
+
+/* CAUTION: paper still, banded top and bottom with a diagonal hatch. */
+.verdict--caution {
+  background-color: var(--tint-caution);
+  background-image:
+    repeating-linear-gradient(45deg, var(--ink) 0 7px, var(--paper) 7px 14px),
+    repeating-linear-gradient(45deg, var(--ink) 0 7px, var(--paper) 7px 14px);
+  background-size: 100% 9px, 100% 9px;
+  background-position: top left, bottom left;
+  background-repeat: no-repeat;
+  padding-top: 19px;
+  padding-bottom: 19px;
+}
+
+/* DANGER: the block inverts. Inversion is the loudest signal a monochrome
+   screen has, and it reads at a glance from across a boat. */
+.verdict--danger {
+  background-color: var(--ink);
+  color: var(--paper);
+  background-image:
+    repeating-linear-gradient(-45deg, var(--paper) 0 7px, var(--ink) 7px 14px),
+    repeating-linear-gradient(-45deg, var(--paper) 0 7px, var(--ink) 7px 14px);
+  background-size: 100% 10px, 100% 10px;
+  background-position: top left, bottom left;
+  background-repeat: no-repeat;
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+
+/* NO DATA: a grid, which is neither of the diagonals above. Deliberately NOT
+   plain paper: an empty white panel next to a calm sea reads as calm, and this
+   state is the one most easily mistaken for good news. */
+.verdict--nodata {
+  background-color: var(--tint-nodata);
+  background-image:
+    repeating-linear-gradient(0deg, var(--ink) 0 2px, var(--paper) 2px 9px),
+    repeating-linear-gradient(90deg, var(--ink) 0 2px, var(--paper) 2px 9px);
+  background-size: 100% 10px, 100% 10px;
+  background-position: top left, bottom left;
+  background-repeat: no-repeat;
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+
+/* -------------------------------------------------------------- figures -- */
+
+/*
+ * Three columns at every width. The previous single-column fallback below
+ * 380px is gone on purpose: stacking these puts the third figure under the
+ * fold on the exact phone the layout rule names.
+ */
+.figures {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.figure {
+  border: var(--rule) solid var(--ink);
+  border-top: 6px solid var(--accent-safe);
+  padding: 6px 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.figure__label {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.figure__value {
+  font-size: clamp(0.98rem, 4.3vw, 1.45rem);
+  font-weight: 800;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.figure__sub {
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.figure__sub:empty { display: none; }
+
+/* A stale forecast inverts its own figure. Same device as danger, because it
+   is the same kind of message: do not lean on this. */
+.figure--alarm {
+  background: var(--ink);
+  color: var(--paper);
+  border-top-color: var(--accent-danger);
+}
+
+/* --------------------------------------------- everything that scrolls -- */
+
+.rest {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+
+.locate {
+  margin: 0;
+  border: var(--rule) solid var(--ink);
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.locate--live {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--accent-safe);
+}
+
+.reference {
+  margin: 0;
+  border-left: var(--rule) solid var(--ink);
+  padding: 2px 0 2px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------- change area -- */
+
+/*
+ * NO display RULE ON THIS ELEMENT. It is a <details>, and setting `display`
+ * on a <details> stops the browser hiding its own contents while it is
+ * closed -- the disclosure then never collapses, and the "Change area" button
+ * that opens it does nothing visible, because it was already open.
+ *
+ * Same family as the [hidden] bug at the top of this file: an author rule
+ * quietly overriding behaviour the user agent was providing.
+ */
+.change {
+  border-top: var(--rule) solid var(--ink);
+  padding-top: 10px;
+}
+
+.change__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.change__title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.pick__row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pick__label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.pick__select {
+  appearance: none;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 40px 0 12px;
+  border: var(--rule) solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  /* A solid black chevron drawn with gradients, so no image request and no
+     icon font on a 2G connection. */
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ink) 50%),
+    linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+  background-position: right 20px center, right 12px center;
+  background-size: 9px 9px, 9px 9px;
+  background-repeat: no-repeat;
+}
+
+.pick__select:focus-visible {
+  outline: var(--rule) solid var(--ink);
+  outline-offset: 3px;
+}
+
+.change__buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.action {
+  min-height: var(--tap);
+  border: var(--rule) solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.action:active { background: var(--ink); color: var(--paper); }
+
+/*
+ * NO BUTTON MAY CARRY A HAZARD PATTERN. Not disabled, not pressed, not ever.
+ *
+ * The legend two strips up assigns meanings to these marks: 45 degree hatch is
+ * DANGER, dots are CAUTION, plain is SAFE, grid is NO DATA. Those meanings do
+ * not stop at the edge of the map. A hatched button reads as danger to anyone
+ * who has just read the key, and this screen is built on the promise that the
+ * pattern IS the message, so a control wearing one is a false statement.
+ *
+ * Two buttons used to break this: Route was hatched to look absent, and
+ * "Centre on me" was hatched whenever there was no fix, which is most of the
+ * time. Both are fixed. Buttons are white with a thick black border, and
+ * invert on press. Unavailable is said with a dashed border.
+ */
+
+/* ------------------------------------------------------ source, loaders -- */
+
+.source {
+  margin: 0;
+  border-left: var(--rule) solid var(--ink);
+  padding: 2px 0 2px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.load__error {
+  margin: 0;
+  border: var(--rule) solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.load__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.manual,
+.prov {
+  border-top: var(--rule) solid var(--ink);
+  padding-top: 8px;
+}
+
+.manual__summary,
+.prov__summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.manual__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.manual__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 0 16px;
+  border: var(--rule) solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.manual__button:active { background: var(--ink); color: var(--paper); }
+
+.manual__hint {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.prov__body {
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.prov__body p { margin: 0 0 8px; }
+.prov__body ul { margin: 0 0 8px; padding-left: 16px; }
+
+.prov__heading {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin: 0 0 5px;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+}
+
+/* ==========================================================================
+   ESCAPE
+   ==========================================================================
+
+   A separate full-screen layer, not more rows on the home screen. The home
+   screen answers "can I go out"; this one answers "where do I run". Stacking
+   both in one column is what made the interface feel crowded, so the only
+   thing they share is the button below.
+
+   Everything here is a size up from the rest of the app. It is read at a run,
+   one-handed, possibly in the dark and possibly in water. */
+
+.escape-open {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-height: var(--tap);
+  margin: 0;
+  padding: 8px 10px;
+  border: var(--rule) solid var(--ink);
+  border-radius: 0;
+  /* Inverted, because it is the only control on the screen that means
+     "something has gone wrong". No hazard pattern: see the rule above
+     .action. Inversion carries it, exactly as the stale strip does. */
+  background: var(--ink);
+  color: var(--paper);
+  font: inherit;
+  cursor: pointer;
+}
+
+.escape-open:active { background: var(--paper); color: var(--ink); }
+
+.escape-open__word {
+  font-size: 1.15rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.escape-open__sub {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* The layer itself ------------------------------------------------------- */
+
+.body--escape { overflow: hidden; }
+
+.escape {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 0 10px env(safe-area-inset-bottom);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.escape__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.escape__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+}
+
+.escape__close {
+  min-height: 44px;
+  padding: 0 16px;
+  border: var(--rule) solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.escape__close:active { background: var(--ink); color: var(--paper); }
+
+.escape__status {
+  flex: 0 0 auto;
+  margin: 0 0 6px;
+  border-left: var(--rule) solid var(--ink);
+  padding: 3px 0 3px 10px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.escape__status--warn {
+  border-left: 0;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 6px 10px;
+}
+
+/* The decision ----------------------------------------------------------- */
+
+.escape__arrowwrap {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0 8px;
+}
+
+.escape__arrow {
+  width: min(38vw, 150px);
+  height: min(38vw, 150px);
+  color: var(--ink);
+  /* No transition. A smoothed arrow lags the compass, and an arrow that lags
+     is an arrow that is wrong while it catches up. */
+}
+
+/* Without a compass the arrow is a map bearing, not a "point the phone" arrow.
+   Dashed, so it cannot be mistaken for the live one. */
+.escape__arrowwrap--nocompass .escape__arrow { opacity: 0.55; }
+
+.escape__go {
+  margin: 0;
+  font-size: clamp(1.6rem, 9vw, 2.6rem);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  line-height: 1.05;
+  text-align: center;
+}
+
+.escape__target {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.escape__dist {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.escape__warn {
+  flex: 0 0 auto;
+  margin: 0;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 7px 10px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.escape__compass {
+  flex: 0 0 auto;
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Everything below scrolls ------------------------------------------------ */
+
+.escape__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.escape__list {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.safeplace {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 8px 10px;
+  border: var(--rule) solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The selected one is inverted. Shape and inversion, never colour alone. */
+.safeplace--on { background: var(--ink); color: var(--paper); }
+
+.safeplace__name { font-size: 1rem; font-weight: 900; }
+.safeplace__meta { font-size: 0.74rem; font-weight: 700; }
+
+.escape__map {
+  display: block;
+  width: 100%;
+  height: 40vh;
+  min-height: 180px;
+  margin: 0 0 10px;
+  border: var(--rule) solid var(--ink);
+  background: var(--paper);
+}
+
+.escape__manual { margin: 0 0 10px; border: var(--rule) solid var(--ink); }
+
+.escape__manualsummary {
+  padding: 12px 10px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.escape__manualbody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.escape__source {
+  margin: 0 0 8px;
+  border-left: var(--rule) solid var(--ink);
+  padding: 2px 0 2px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+/*
+ * An empty line must take no space and paint no border. Several of these carry
+ * a border-left or an inverted background, and when the text was empty all the
+ * user saw was a small floating mark with nothing next to it.
+ */
+.escape__status:empty,
+.escape__compass:empty,
+.escape__target:empty,
+.escape__dist:empty,
+.escape__go:empty,
+.escape__source:empty { display: none !important; }
+
+.escape__listnote {
+  margin: 0 0 8px;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 7px 10px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+/* A way out to a road map. Deliberately NOT inverted and NOT the size of the
+   ESCAPE bar: this app's own answer is the arrow, and a louder button here
+   would say the opposite. */
+.gmaps {
+  display: block;
+  min-height: var(--tap);
+  margin: 0 0 4px;
+  border: var(--rule) solid var(--ink);
+  padding: 16px 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-decoration: none;
+}
+
+.gmaps:active { background: var(--ink); color: var(--paper); }
+
+.gmaps__note {
+  margin: 0 0 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+
+/* ------------------------------------------------------------- sea mode -- */
+
+/* Two big buttons on one row, so adding sea mode cost the fixed region no
+   height at all: the escape bar was already full width. */
+.bigrow {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--gap);
+}
+
+.bigrow .escape-open { flex: 1 1 0; min-width: 0; }
+
+/* The boundary alarm. Inverted at 5 NM; at 2 NM the whole block inverts and
+   grows, because by then it is the only thing on the screen that matters. */
+.sea__imbl {
+  flex: 0 0 auto;
+  margin: 0 0 6px;
+  border: var(--rule) solid var(--ink);
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.sea__imbl--danger {
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 0.95rem;
+  padding: 12px 10px;
+}
+
+.sea__speed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  border: var(--rule) solid var(--ink);
+  padding: 8px 10px;
+}
+
+.sea__speedlabel { font-size: 0.85rem; font-weight: 800; }
+.sea__speedunit { font-size: 0.85rem; font-weight: 800; }
+
+.sea__speedinput {
+  flex: 0 1 5rem;
+  min-height: 44px;
+  border: var(--rule) solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.sos {
+  margin: 0 0 10px;
+  border: var(--rule) solid var(--ink);
+  padding: 10px;
+}
+
+.sos__title {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.sos__pos {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+/* Above the buttons, not below them. The radio is the answer at sea; these
+   buttons are what you use once there is a bar of signal. */
+.sos__vhf {
+  margin: 0 0 10px;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.sos__btn {
+  display: block;
+  margin: 0 0 8px;
+  padding: 16px 10px;
+  text-align: center;
+  text-decoration: none;
+}
+
+.sos__note {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* ----------------------------------------------------------------- tide -- */
+
+.tide { margin: 0 0 10px; border: var(--rule) solid var(--ink); padding: 10px; }
+
+.tide__where { margin: 0 0 4px; font-size: 0.9rem; font-weight: 900; }
+
+/* The tide is a local thing. When the only gauge is on another coast, that is
+   not a footnote. */
+.tide__far {
+  margin: 0 0 8px;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 8px 10px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.tide__now { margin: 0 0 6px; font-size: 1.3rem; font-weight: 900; }
+
+.tide__turns { margin: 0 0 8px; padding: 0; list-style: none; }
+
+.tide__turn {
+  padding: 4px 0;
+  border-top: 1px solid var(--ink);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.tide__svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+  margin: 0 0 8px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+}
+
+.tide__warn {
+  margin: 0 0 8px;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 7px 10px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.tide__note {
+  margin: 0 0 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* A third control under the two big ones. Inverted like them, but one line
+   and shorter, because changing area is a deliberate act rather than an
+   emergency and it must not compete with ESCAPE for the eye. */
+.changebtn {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  border: var(--rule) solid var(--ink);
+  border-radius: 0;
+  background: var(--ink);
+  color: var(--paper);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.changebtn:active { background: var(--paper); color: var(--ink); }
+
+
+/* ------------------------------------------------------------ text only -- */
+
+.bigrow--slim { margin: 0; }
+.bigrow--slim .changebtn { flex: 1 1 0; min-width: 0; }
+
+.txt__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0 20px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.txt__line {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.35;
+  /* Selectable on purpose: a position read out over a radio is easier to get
+     right if it can be copied. */
+  user-select: text;
+}
+
+.txt__head { font-weight: 900; letter-spacing: 0.06em; }
+
+.txt__line--loud {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 8px 10px;
+  font-weight: 900;
+}
+
+.txt__gap { height: 10px; }
+
+/* ------------------------------------------------------------- ask orca -- */
+/* Staging only. The one screen that needs a network. */
+
+.chat__offline,
+.chat__note { margin: 0 0 8px; font-size: 0.76rem; font-weight: 700; line-height: 1.3; }
+.chat__offline { background: var(--ink); color: var(--paper); padding: 8px 10px; font-weight: 800; }
+
+.chat__log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0 10px;
+}
+
+.chat__you, .chat__them {
+  margin: 0 0 8px;
+  border: var(--rule) solid var(--ink);
+  padding: 8px 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+/* The user's own words inverted, so the two sides are told apart by weight
+   and not by colour. */
+.chat__you { background: var(--ink); color: var(--paper); }
+
+/* A verdict is never buried in prose. */
+.chat__verdict {
+  margin: -4px 0 8px;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 10px;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.chat__fallback { margin: -4px 0 8px; font-size: 0.76rem; font-weight: 800; }
+
+.chat__why { margin: -4px 0 10px; border: 1px solid var(--ink); }
+.chat__whysummary { padding: 8px 10px; font-size: 0.8rem; font-weight: 800; cursor: pointer; }
+.chat__evidence { margin: 0; padding: 0 10px 8px; font-size: 0.72rem; font-weight: 700; line-height: 1.3; }
+.chat__claim { font-weight: 900; }
+
+.chat__composer { flex: 0 0 auto; display: flex; gap: var(--gap); padding: 0 0 12px; }
+
+.chat__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--tap);
+  border: var(--rule) solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 0 10px;
+}
+
+.chat__send { flex: 0 0 auto; padding: 0 18px; }
+.chat__send:disabled { cursor: not-allowed; border-style: dashed; }

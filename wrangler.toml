@@ -1,0 +1,33 @@
+# Worker + static assets.
+#
+# The app is served exactly as the dashboard upload served it: every path
+# except /api/* comes straight from ./dist via the ASSETS binding, including
+# the service worker, the bundles and the /index.html -> / redirect. Only
+# /api/* reaches the Worker, because of run_worker_first below.
+#
+# THERE ARE NO SECRETS IN THIS FILE. SARVAM_API_KEY comes from .dev.vars
+# locally (gitignored) and from `wrangler secret put SARVAM_API_KEY --env
+# staging` on staging.
+
+name = "orcamarina"
+main = "worker/index.ts"
+compatibility_date = "2026-09-01"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+# Only these paths run the Worker first. Everything else is a static asset and
+# never touches our code.
+run_worker_first = ["/api/*"]
+
+[observability]
+enabled = true
+
+# Staging. The only environment this feature is allowed on.
+[env.staging]
+name = "orcamarina-staging"
+
+[env.staging.assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]

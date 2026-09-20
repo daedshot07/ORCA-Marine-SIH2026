@@ -1,0 +1,15 @@
+# Cloudflare Workers static assets reads this file.
+#
+# The service worker and the manifest must never be served from a stale edge or
+# browser cache. Everything else Vite emits is content-hashed and safe to cache
+# hard, but these two keep their filenames forever, so a cached copy is how a
+# phone gets stuck on an old worker and stops picking up new builds.
+#
+# no-cache does not mean "do not store". It means revalidate before use, which
+# is exactly what is wanted: a 304 costs nothing on 2G, a stale worker costs
+# the whole update.
+/sw.js
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: no-cache

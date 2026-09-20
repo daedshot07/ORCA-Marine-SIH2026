@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light only" />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <title>ORCA Mobile</title>
+  </head>
+  <body>
+    <!--
+      One column, full viewport height. Header, stale strip, map, legend,
+      verdict and figures are fixed children; everything after them lives in
+      the single scrolling region at the bottom.
+
+      That split is the layout rule made structural: the verdict and the three
+      figures sit OUTSIDE the scroll container, so nothing added later can push
+      them below the fold on a small phone.
+    -->
+    <div class="app" id="app">
+      <header class="head">
+        <h1 class="head__title">ORCA</h1>
+        <p class="head__state" id="region">no bundle loaded</p>
+      </header>
+
+      <!-- Directly under the header, before the map: a forecast over twelve
+           hours old is the first thing a reader should see, not the last. -->
+      <p class="stale" id="stale" hidden></p>
+
+      <div class="mapwrap">
+        <canvas class="mapwrap__canvas" id="mapCanvas"></canvas>
+        <button class="centre" id="centreMe" type="button" disabled>
+          Centre on me
+        </button>
+      </div>
+
+      <!-- Outside the canvas on purpose. These cells are told apart by pattern
+           alone, and a key drawn on top of them covers the water nearest the
+           coast, which is exactly where someone is looking. -->
+      <ul class="legend" id="legend">
+        <li class="legend__item"><span class="legend__swatch legend__swatch--danger"></span>danger</li>
+        <li class="legend__item"><span class="legend__swatch legend__swatch--caution"></span>caution</li>
+        <li class="legend__item"><span class="legend__swatch legend__swatch--safe"></span>safe</li>
+        <li class="legend__item"><span class="legend__swatch legend__swatch--nodata"></span>no data</li>
+      </ul>
+
+      <!-- The word and its number are one string in one element, so there is no
+           code path that renders the word alone. -->
+      <section class="verdict" id="verdict" hidden>
+        <p class="verdict__line" id="verdictLine"></p>
+        <p class="verdict__note" id="verdictNote"></p>
+      </section>
+
+      <section class="figures" id="figures" hidden>
+        <div class="figure" id="figBoundary">
+          <span class="figure__label">Nearest boundary</span>
+          <span class="figure__value" id="boundaryValue">&mdash;</span>
+          <span class="figure__sub" id="boundarySub"></span>
+        </div>
+        <div class="figure">
+          <span class="figure__label" id="harbourLabel">Time to harbour</span>
+          <span class="figure__value" id="harbourValue">&mdash;</span>
+          <span class="figure__sub" id="harbourSub"></span>
+        </div>
+        <div class="figure" id="figAge">
+          <span class="figure__label">Data age</span>
+          <span class="figure__value" id="ageValue">&mdash;</span>
+          <span class="figure__sub" id="ageSub"></span>
+        </div>
+      </section>
+
+      <!-- In the fixed region, below the figures: one tap, always on screen,
+           and it does not push the verdict anywhere. -->
+      <div class="bigrow">
+        <button class="escape-open" id="escapeOpen" type="button" hidden>
+          <span class="escape-open__word">ESCAPE</span>
+          <span class="escape-open__sub">on land &middot; safe place</span>
+        </button>
+        <button class="escape-open" id="seaOpen" type="button" hidden>
+          <span class="escape-open__word">SEA MODE</span>
+          <span class="escape-open__sub">at sea &middot; return to harbour</span>
+        </button>
+      </div>
+
+      <div class="bigrow bigrow--slim">
+        <button class="changebtn" id="changeAreaButton" type="button" hidden>
+          Change area
+        </button>
+        <button class="changebtn" id="textModeButton" type="button" hidden>
+          Text only
+        </button>
+        <!-- Staging only. Hidden unless VITE_FLAG_CHAT is on AND a bundle has
+             loaded, so it can never appear on a build that has no Worker. -->
+        <button class="changebtn" id="chatButton" type="button" hidden>
+          Ask
+        </button>
+      </div>
+
+      <div class="rest" id="rest">
+        <p class="locate" id="locate" hidden></p>
+
+        <p class="reference" id="reference" hidden></p>
+
+        <!-- The layout lives on .change__body, NOT on the <details>. A display
+             rule on a <details> stops the browser hiding its contents when it
+             is closed, so the disclosure never collapses and the button that
+             opens it looks broken. -->
+        <details class="change" id="pick" hidden>
+          <summary class="change__title">Change area</summary>
+          <div class="change__body">
+            <label class="pick__row">
+              <span class="pick__label">District</span>
+              <select class="pick__select" id="district"></select>
+            </label>
+            <label class="pick__row">
+              <span class="pick__label">Landing centre</span>
+              <select class="pick__select" id="place"></select>
+            </label>
+            <div class="change__buttons" id="actions" hidden>
+              <button class="action" id="locateButton" type="button">Use my location</button>
+              <button class="action" id="placeButton" type="button" hidden>Use this place</button>
+            </div>
+          </div>
+        </details>
+
+        <p class="source" id="source">Looking for a forecast bundle&hellip;</p>
+
+        <p class="load__error" id="loadError" hidden></p>
+
+        <details class="manual" id="load">
+          <summary class="manual__summary">Load a bundle file instead</summary>
+          <div class="manual__body">
+            <label class="manual__button" for="file">Choose file</label>
+            <input class="load__input" id="file" type="file" accept=".orcabundle,application/octet-stream" />
+            <p class="manual__hint" id="loadHint">
+              A <code>.orcabundle</code> file from the shore system. It is stored
+              on this device and works with no network afterwards.
+            </p>
+          </div>
+        </details>
+
+        <details class="prov" id="prov" hidden>
+          <summary class="prov__summary">Where these numbers come from</summary>
+          <div class="prov__body" id="provBody"></div>
+        </details>
+      </div>
+    </div>
+
+    <!--
+      The escape screen. A separate layer rather than more rows on the main
+      screen: the home screen answers "can I go out", this one answers "where
+      do I run", and putting both in one column is what made the interface feel
+      crowded. Only the ESCAPE button above lives on both.
+    -->
+    <section class="escape" id="escape" hidden>
+      <header class="escape__head">
+        <h2 class="escape__title">SAFE PLACE</h2>
+        <button class="escape__close" id="escapeClose" type="button">Close</button>
+      </header>
+
+      <p class="escape__status" id="escapeStatus"></p>
+
+      <!-- The decision, and nothing else, at the top. -->
+      <div class="escape__arrowwrap" id="escapeArrowWrap">
+        <svg class="escape__arrow" id="escapeArrowMark" viewBox="0 0 100 100"
+             aria-hidden="true" focusable="false">
+          <path d="M50 4 L86 92 L50 70 L14 92 Z" fill="currentColor" />
+        </svg>
+        <p class="escape__go" id="escapeGo"></p>
+        <p class="escape__target" id="escapeTargetName"></p>
+        <p class="escape__dist" id="escapeDist"></p>
+      </div>
+
+      <!-- Fixed under the arrow, never scrollable away from it. -->
+      <p class="escape__warn">
+        Straight-line direction. Follow roads and official instructions.
+      </p>
+      <p class="escape__compass" id="escapeCompass"></p>
+
+      <div class="escape__scroll">
+        <!-- Secondary, and in the scrolling region on purpose: the decision is
+             the arrow above. This is a way out to a road map, not the answer. -->
+        <a class="gmaps" id="escapeGmaps" target="_blank" rel="noopener noreferrer" hidden>
+          OPEN IN GOOGLE MAPS
+        </a>
+        <p class="gmaps__note" id="escapeGmapsNote" hidden>
+          Leaves this app. Works offline only if you downloaded this area in
+          Google Maps beforehand (driving directions).
+        </p>
+
+        <p class="escape__listnote" id="escapeListNote" hidden></p>
+        <ul class="escape__list" id="escapeList"></ul>
+
+        <canvas class="escape__map" id="escapeMap"></canvas>
+
+        <details class="escape__manual" id="escapeManual">
+          <summary class="escape__manualsummary">No GPS? Pick your place by hand</summary>
+          <div class="escape__manualbody">
+            <select class="pick__select" id="escapeManualSelect"></select>
+            <button class="action" id="escapeManualUse" type="button">
+              Use this place
+            </button>
+          </div>
+        </details>
+
+        <p class="escape__source" id="escapeSource"></p>
+        <p class="escape__source">
+          These are community-mapped buildings, not an official shelter
+          register. Nobody has checked that they are open, staffed, above the
+          water or still standing.
+        </p>
+      </div>
+    </section>
+
+    <!-- SEA MODE. A sibling of the escape screen: same structure, different
+         question. The boundary alarm sits ABOVE the heading because it can
+         override it, and neither can be scrolled away from the other. -->
+    <section class="escape sea" id="sea" hidden>
+      <header class="escape__head">
+        <h2 class="escape__title">SEA MODE &mdash; RETURN TO HARBOUR</h2>
+        <button class="escape__close" id="seaClose" type="button">Close</button>
+      </header>
+
+      <p class="escape__status" id="seaStatus"></p>
+      <p class="sea__imbl" id="seaImbl" hidden></p>
+
+      <div class="escape__arrowwrap" id="seaArrowWrap">
+        <svg class="escape__arrow" id="seaArrowMark" viewBox="0 0 100 100"
+             aria-hidden="true" focusable="false">
+          <path d="M50 4 L86 92 L50 70 L14 92 Z" fill="currentColor" />
+        </svg>
+        <p class="escape__go" id="seaSteer"></p>
+        <p class="escape__target" id="seaTargetName"></p>
+        <p class="escape__dist" id="seaDetail"></p>
+      </div>
+
+      <p class="escape__warn">
+        No depth data anywhere in this app. This avoids the shore and the
+        boundary and nothing else &mdash; not bars, reefs, or traffic.
+      </p>
+      <p class="escape__compass" id="seaCompass"></p>
+
+      <div class="escape__scroll">
+        <p class="escape__source" id="seaRoute" hidden></p>
+
+        <label class="sea__speed">
+          <span class="sea__speedlabel">Boat speed</span>
+          <input class="sea__speedinput" id="seaSpeed" type="number"
+                 min="1" max="30" step="0.5" value="6" inputmode="decimal" />
+          <span class="sea__speedunit">knots</span>
+        </label>
+
+        <ul class="escape__list" id="seaList"></ul>
+
+        <canvas class="escape__map" id="seaMap"></canvas>
+
+        <details class="escape__manual" id="seaManual">
+          <summary class="escape__manualsummary">No GPS? Pick your position by hand</summary>
+          <div class="escape__manualbody">
+            <select class="pick__select" id="seaManualSelect"></select>
+            <button class="action" id="seaManualUse" type="button">Use this place</button>
+          </div>
+        </details>
+
+        <section class="tide" id="seaTide"></section>
+
+        <section class="sos" id="seaSos">
+          <p class="sos__title">SOS</p>
+          <p class="sos__pos" id="seaSosPos"></p>
+          <p class="sos__vhf">
+            THIS PHONE SENDS NOTHING WITHOUT SIGNAL. At sea, use VHF channel 16
+            first. The buttons below are the fallback for when signal returns.
+          </p>
+          <a class="action sos__btn" id="seaSosSms" hidden>Open SMS with my position</a>
+          <a class="action sos__btn" id="seaSosCall" href="tel:1554">
+            Call Coast Guard 1554
+          </a>
+          <a class="action sos__btn" href="tel:112">Call emergency 112</a>
+          <p class="sos__note">
+            1554 is the Indian Coast Guard's toll-free number for reporting an
+            eventuality at sea, per a Press Information Bureau release. We could
+            not open indiancoastguard.gov.in directly to confirm it (TLS error),
+            so verify before relying on it. 112 is the pan-India emergency
+            number.
+          </p>
+        </section>
+
+        <p class="escape__source" id="seaDisclaimer"></p>
+      </div>
+    </section>
+
+    <!-- Text only. No canvas, no SVG, nothing that can render blank: every
+         number the map and the other screens show, asked of the same pure
+         functions and printed. This is the view that still works when the
+         drawing or the location does not. -->
+    <section class="escape txt" id="textMode" hidden>
+      <header class="escape__head">
+        <h2 class="escape__title">TEXT ONLY</h2>
+        <button class="escape__close" id="textModeClose" type="button">Close</button>
+      </header>
+      <div class="txt__body" id="textModeBody"></div>
+    </section>
+
+    <!-- The chat assistant. THE ONLY SCREEN THAT NEEDS THE INTERNET, staging
+         only, behind VITE_FLAG_CHAT. Nothing else in the app depends on it. -->
+    <section class="escape chat" id="chat" hidden>
+      <header class="escape__head">
+        <h2 class="escape__title">ASK ORCA</h2>
+        <button class="escape__close" id="chatClose" type="button">Close</button>
+      </header>
+      <p class="chat__offline" id="chatOffline" hidden></p>
+      <p class="chat__note">
+        Answers come from the forecast on this device. Every number is shown
+        with its source under &ldquo;Why&rdquo;.
+      </p>
+      <div class="chat__log" id="chatLog"></div>
+      <div class="chat__composer">
+        <input class="chat__input" id="chatInput" type="text" autocomplete="off"
+               placeholder="Ask in English, Tamil, Hindi or Malayalam" />
+        <button class="action chat__send" id="chatSend" type="button">Send</button>
+      </div>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

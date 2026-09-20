@@ -1,0 +1,20 @@
+{
+  "index_version": 1,
+  "note": "Region selection happens on the device. No request from the app carries a position.",
+  "regions": [
+    {
+      "bbox": [
+        74.0,
+        7.0,
+        81.0,
+        13.6
+      ],
+      "bytes": 323424,
+      "file": "kerala-tn.orcabundle",
+      "format_version": 3,
+      "generated_at": "2026-09-10T17:33:12.143560+00:00",
+      "name": "Kerala and Tamil Nadu coast",
+      "region_id": "kerala-tn"
+    }
+  ]
+}

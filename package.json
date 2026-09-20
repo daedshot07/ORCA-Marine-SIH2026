@@ -1,0 +1,27 @@
+{
+  "name": "orca-marina",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ORCA Mobile - offline-first coastal safety PWA",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node tools/build-sw.mjs",
+    "preview": "vite preview",
+    "icons": "node tools/make-icons.mjs",
+    "check": "npm run check:thresholds && npm run check:parse && npm run check:screen && npm run check:places && npm run check:sw",
+    "check:thresholds": "node tools/check-thresholds.mjs",
+    "check:parse": "node tools/parse-check.mjs public/bundles/kerala-tn.orcabundle",
+    "check:screen": "node tools/screen-check.mjs public/bundles/kerala-tn.orcabundle",
+    "check:places": "node scripts/check-safe-places.mjs",
+    "check:sw": "node tools/check-sw.mjs",
+    "bundle": ".venv/bin/python builder/build_bundle.py --region kerala-tn",
+    "build:staging": "tsc --noEmit && vite build --mode staging && node tools/build-sw.mjs",
+    "dev:worker": "npx wrangler dev",
+    "deploy:staging": "npm run build:staging && npx wrangler deploy --env staging"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vite": "^8.3.0"
+  }
+}
